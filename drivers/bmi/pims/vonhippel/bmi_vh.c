@@ -79,6 +79,7 @@ struct bmi_vh
   char			rbuf[BUF_MAX_SIZE];	// SPI read buffer
   char			wbuf[BUF_MAX_SIZE];	// SPI write buffer
   unsigned long ints;				// Number of interrupts
+  struct wait_queue_head_t intq;		// Wait queue for interupts
 };
 
 static struct bmi_vh bmi_vh[4];	// per slot device structure
@@ -557,12 +558,44 @@ int cntl_ioctl(struct inode *inode, struct file *file, unsigned int cmd,
 	return 0;
 }
 
+//cntl_read - will block until interrupt is recieved
+ssize_t cntl_read (struct file *, char buff *, size_t bufflen, loff_t * offset){
+	//Right now, we only care about the file
+	//Future implementations could use the buffer or offset for addl functionality
+	struct bmi_vh *vh;
+
+        vh = (struct bmi_vh *)(file->private_data);		//Retrieve the VH struct
+
+	if(vh->bdev == 0)					//Check to make sure it is opened
+                return -ENODEV;
+
+	if (vh->ints > 0){					//If interrupts have been recieved
+		if (vh->ints > (0xFF * sizeof(ssize_t)))	//Clip output to a ssize_t
+			return 0xFF * sizeof(ssize_t);
+		return (ssize_t)vh->ints;
+	}
+
+	//Prepare to sleep
+	DEFINE_WAIT(wait);
+	add_wait_queue(vh->intq, &wait);
+	while (vh->ints == 0){				//Wake up when ints > 0
+		prepare_to_wait(vh->&intq, &wait, TASK_INTERRUPTABLE);
+		if (signal_pending(current))
+			break;				//This should be more robust!
+		schedule();
+	}
+	finish_wait(vh->&intq, &wait);
+	return vh->ints;				//If returns 0, we were signal'd
+							//OTW, we actually recieved an interrupt!
+}
+
 // control file operations
 struct file_operations cntl_fops = {
 	.owner = THIS_MODULE, 
 	.ioctl = cntl_ioctl, 
 	.open = cntl_open, 
 	.release = cntl_release, 
+	.read = cntl_read,
 };
 
 /*
@@ -574,7 +607,7 @@ static irqreturn_t module_irq_handler(int irq, void *dummy)
 {
 	struct bmi_vh *vh = dummy;
 	vh->ints++;
-	printk("vh_interrupt: %lu\r\n",vh->ints);
+	wake_up_interruptible(vh->&intq);
 	return IRQ_HANDLED;
 }
 
@@ -607,6 +640,7 @@ int bmi_vh_probe(struct bmi_device *bdev)
 	vh->bdev = 0;
 	vh->open_flag = 0;
 	vh->ints = 0;
+	init_waitqueue_head(vh->intq);
 	
 	// Create 1 minor device
 	cdev = &vh->cdev;
