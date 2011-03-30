@@ -78,6 +78,7 @@ struct bmi_vh
   struct spi_board_info vh_spi_info;
   char			rbuf[BUF_MAX_SIZE];	// SPI read buffer
   char			wbuf[BUF_MAX_SIZE];	// SPI write buffer
+  unsigned long ints;				// Number of interrupts
 };
 
 static struct bmi_vh bmi_vh[4];	// per slot device structure
@@ -571,6 +572,9 @@ struct file_operations cntl_fops = {
 // interrupt handler
 static irqreturn_t module_irq_handler(int irq, void *dummy)
 {
+	struct bmi_vh *vh = dummy;
+	vh->ints++;
+	printk("vh_interrupt: %lu\r\n",vh->ints);
 	return IRQ_HANDLED;
 }
 
@@ -602,6 +606,7 @@ int bmi_vh_probe(struct bmi_device *bdev)
 
 	vh->bdev = 0;
 	vh->open_flag = 0;
+	vh->ints = 0;
 	
 	// Create 1 minor device
 	cdev = &vh->cdev;
