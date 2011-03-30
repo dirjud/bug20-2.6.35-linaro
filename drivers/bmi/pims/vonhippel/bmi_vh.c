@@ -28,6 +28,8 @@
 #include <linux/delay.h>
 #include <linux/jiffies.h>
 #include <linux/timer.h>
+#include <linux/wait.h>
+#include <linux/sched.h>
 
 #include <asm/uaccess.h>
 #include <asm/io.h>
@@ -79,7 +81,7 @@ struct bmi_vh
   char			rbuf[BUF_MAX_SIZE];	// SPI read buffer
   char			wbuf[BUF_MAX_SIZE];	// SPI write buffer
   unsigned long ints;				// Number of interrupts
-  struct wait_queue_head_t intq;		// Wait queue for interupts
+  wait_queue_head_t  intq;		// Wait queue for interupts
 };
 
 static struct bmi_vh bmi_vh[4];	// per slot device structure
@@ -559,7 +561,8 @@ int cntl_ioctl(struct inode *inode, struct file *file, unsigned int cmd,
 }
 
 //cntl_read - will block until interrupt is recieved
-ssize_t cntl_read (struct file *, char buff *, size_t bufflen, loff_t * offset){
+ssize_t cntl_read (struct file *file, char * buff, size_t bufflen, loff_t * offset){
+	ssize_t ret;
 	//Right now, we only care about the file
 	//Future implementations could use the buffer or offset for addl functionality
 	struct bmi_vh *vh;
@@ -570,23 +573,27 @@ ssize_t cntl_read (struct file *, char buff *, size_t bufflen, loff_t * offset){
                 return -ENODEV;
 
 	if (vh->ints > 0){					//If interrupts have been recieved
-		if (vh->ints > (0xFF * sizeof(ssize_t)))	//Clip output to a ssize_t
+		ret = (ssize_t)vh->ints;
+		vh->ints = 0;
+		if (ret > (0xFF * sizeof(ssize_t)))	//Clip output to a ssize_t
 			return 0xFF * sizeof(ssize_t);
-		return (ssize_t)vh->ints;
+		return ret;
 	}
 
 	//Prepare to sleep
 	DEFINE_WAIT(wait);
-	add_wait_queue(vh->intq, &wait);
+	add_wait_queue(&(vh->intq), &wait);
 	while (vh->ints == 0){				//Wake up when ints > 0
-		prepare_to_wait(vh->&intq, &wait, TASK_INTERRUPTABLE);
+		prepare_to_wait(&(vh->intq), &wait, TASK_INTERRUPTIBLE);
 		if (signal_pending(current))
 			break;				//This should be more robust!
 		schedule();
 	}
-	finish_wait(vh->&intq, &wait);
-	return vh->ints;				//If returns 0, we were signal'd
-							//OTW, we actually recieved an interrupt!
+	finish_wait(&(vh->intq), &wait);
+	ret = (ssize_t)vh->ints;
+	vh->ints = 0;
+	return ret;				//If returns 0, we were signal'd
+						//OTW, we actually recieved an interrupt!
 }
 
 // control file operations
@@ -607,7 +614,7 @@ static irqreturn_t module_irq_handler(int irq, void *dummy)
 {
 	struct bmi_vh *vh = dummy;
 	vh->ints++;
-	wake_up_interruptible(vh->&intq);
+	wake_up_interruptible(&(vh->intq));
 	return IRQ_HANDLED;
 }
 
@@ -640,7 +647,7 @@ int bmi_vh_probe(struct bmi_device *bdev)
 	vh->bdev = 0;
 	vh->open_flag = 0;
 	vh->ints = 0;
-	init_waitqueue_head(vh->intq);
+	init_waitqueue_head(&(vh->intq));
 	
 	// Create 1 minor device
 	cdev = &vh->cdev;
