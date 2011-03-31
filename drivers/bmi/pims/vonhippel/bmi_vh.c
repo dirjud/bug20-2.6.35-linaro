@@ -30,6 +30,7 @@
 #include <linux/timer.h>
 #include <linux/wait.h>
 #include <linux/sched.h>
+#include <linux/poll.h>
 
 #include <asm/uaccess.h>
 #include <asm/io.h>
@@ -80,7 +81,7 @@ struct bmi_vh
   struct spi_board_info vh_spi_info;
   char			rbuf[BUF_MAX_SIZE];	// SPI read buffer
   char			wbuf[BUF_MAX_SIZE];	// SPI write buffer
-  unsigned long ints;				// Number of interrupts
+  ssize_t ints;				// Number of interrupts
   wait_queue_head_t  intq;		// Wait queue for interupts
 };
 
@@ -291,6 +292,7 @@ int cntl_release(struct inode *inode, struct file *file)
 	struct bmi_vh *vh;
 
 	vh = (struct bmi_vh *)(file->private_data);
+	wake_up_interruptible(&(vh->intq));
 	vh->open_flag = 0;
 	return 0;
 }
@@ -573,10 +575,8 @@ ssize_t cntl_read (struct file *file, char * buff, size_t bufflen, loff_t * offs
                 return -ENODEV;
 
 	if (vh->ints > 0){					//If interrupts have been recieved
-		ret = (ssize_t)vh->ints;
+		ret = vh->ints;
 		vh->ints = 0;
-		if (ret > (0xFF * sizeof(ssize_t)))	//Clip output to a ssize_t
-			return 0xFF * sizeof(ssize_t);
 		return ret;
 	}
 
@@ -590,10 +590,20 @@ ssize_t cntl_read (struct file *file, char * buff, size_t bufflen, loff_t * offs
 		schedule();
 	}
 	finish_wait(&(vh->intq), &wait);
-	ret = (ssize_t)vh->ints;
+	ret = vh->ints;
 	vh->ints = 0;
 	return ret;				//If returns 0, we were signal'd
 						//OTW, we actually recieved an interrupt!
+}
+
+unsigned int cntl_poll(struct file *file, poll_table *wait){
+	struct bmi_vh *vh;
+	unsigned int mask = 0;
+	vh = (struct bmi_vh *)(file->private_data);
+	poll_wait(file, &(vh->intq), wait);
+	if (vh->ints > 0)
+		mask |= POLLIN | POLLRDNORM;
+	return mask;
 }
 
 // control file operations
@@ -603,6 +613,7 @@ struct file_operations cntl_fops = {
 	.open = cntl_open, 
 	.release = cntl_release, 
 	.read = cntl_read,
+	.poll = cntl_poll,
 };
 
 /*
