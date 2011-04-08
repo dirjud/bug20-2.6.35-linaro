@@ -74,6 +74,15 @@ config BMI_VH
 
 	  This driver can also be built as a module.
 
+config BMI_BUGDUINO
+	tristate "BMI bugduino Module support"
+	depends on BMI_PIMS
+	default n
+	---help---
+	  BMI bugduino plug-in module
+
+	  This driver can also be built as a module.
+
 config BMI_SENSOR
         tristate "BMI Sensor Module support"
         depends on BMI_PIMS
