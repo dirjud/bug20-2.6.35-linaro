@@ -61,6 +61,8 @@ struct bmi_bugduino
   int			open_flag;		// single open flag
   char			int_name[20];		// interrupt name
   struct i2c_client *iox;
+  struct i2c_client *i2c_dev;
+  unsigned char curr_i2c_addr;	//Current i2c address
   struct spi_device *spi;       // SPI device
   struct spi_board_info bugduino_spi_info;
   char                  rbuf[BUF_MAX_SIZE];     // SPI read buffer
@@ -113,6 +115,45 @@ static struct bmi_driver bmi_bugduino_driver =
 /*
  * 	I2C set up
  */
+
+static void chk_i2c_dev (struct bmi_bugduino * bugduino, struct i2c_xfer * xfer){
+	if (bugduino->curr_i2c_addr != xfer->addr){
+	   if (bugduino->i2c_dev != NULL)
+	   	i2c_unregister_device(bugduino->i2c_dev);
+	   struct i2c_board_info i2c_info = {
+	      I2C_BOARD_INFO( "bugduino", xfer->addr ),
+	   };
+	   bugduino->i2c_dev = i2c_new_device( bugduino->bdev->slot->adap, &i2c_info );
+	   bugduino->curr_i2c_addr = xfer->addr;
+	}
+}
+
+static int ReadBytes_I2C (struct i2c_client *client, unsigned char offset, char * data, int len){
+	int ret=0;
+	
+	ret = i2c_master_send(client, &offset, 1);
+	if (ret == 1)
+		ret = i2c_master_recv(client, data, len);
+	if (ret < 0)
+		printk (KERN_ERR "ReadByte_I2C() - i2c_transfer() failed... %d\n",ret);
+	return ret;
+}
+
+static int WriteBytes_I2C (struct i2c_client *client, unsigned char offset, char * data, int len){
+	int ret = 0;
+	int i;
+	char msg[BUF_MAX_SIZE];
+	msg[0] = offset;
+
+	for (i=0;i<len;i++)
+		msg[i+1] = data[i];
+	ret = i2c_master_send(client, msg, len+1);
+	
+	if (ret < 0)
+	  printk (KERN_ERR "WriteByte_IOX() - i2c_transfer() failed...%d\n",ret);
+
+	return ret;
+}
 
 // IOX
 // read byte from I2C IO expander
@@ -187,6 +228,8 @@ int cntl_ioctl(struct inode *inode, struct file *file, unsigned int cmd,
 	struct i2c_adapter *adap;
 	unsigned char iox_data;
 	//	unsigned char buf[4];
+	char msg[BUF_MAX_SIZE];
+	int ret;
 
 	struct bmi_bugduino *bugduino;
 	int slot;
@@ -232,28 +275,52 @@ int cntl_ioctl(struct inode *inode, struct file *file, unsigned int cmd,
 		}
 		break;
 
-	case BMI_BUGDUINO_MKGPIO_OUT:
-		if ((arg < BUGDUINO_GPIO_0) || (arg > BUGDUINO_GPIO_RED_LED))
-			return -EINVAL;
-		bmi_slot_gpio_direction_out (slot, arg, 1);
+	case BMI_BUGDUINO_RESET:
+		bmi_slot_gpio_set_value( slot, BUGDUINO_GPIO_RESET_PIN, ( ( arg == 0 ) ? ( BUGDUINO_RESET_OFF ) : ( BUGDUINO_RESET_ON ) ) );
 		break;
 
-	case BMI_BUGDUINO_MKGPIO_IN:
-		if ((arg < BUGDUINO_GPIO_0) || (arg > BUGDUINO_GPIO_RED_LED))
-			return -EINVAL;
-		bmi_slot_gpio_direction_in (slot, arg);
+	case BMI_BUGDUINO_I2C_WRITE:
+		{
+			struct i2c_xfer xfer;
+			ret = copy_from_user( &xfer, (struct i2c_xfer __user *)arg, sizeof( struct i2c_xfer) );
+			if (ret != 0){
+				printk( KERN_ERR "bmi_bugduino.c: Error copying i2c_xfer from user to kernel space. %i\n", ret);
+				return ret;
+			}
+			memset(msg, 0, xfer.len);
+			ret = copy_from_user( xfer.data, msg, BUF_MAX_SIZE );
+			if (ret != 0){
+				printk( KERN_ERR "bmi_bugduino.c: Error copying i2c data from user to kernel space. %i\n", ret);
+				return ret;
+			}
+			chk_i2c_dev (bugduino, &xfer);
+			ret = WriteBytes_I2C (bugduino->i2c_dev, xfer.offset, msg, xfer.len);
+			if (ret < 0)
+				printk( KERN_ERR "bmi_bugduino.c: Error writing i2c bytes %i\n", ret);
+			return ret;
+			
+		}
 		break;
 
-	case BMI_BUGDUINO_SETGPIO:
-		if ((arg < BUGDUINO_GPIO_0) || (arg > BUGDUINO_GPIO_RED_LED))
-			return -EINVAL;
-		bmi_slot_gpio_set_value (slot, arg, 0x1);
-		break;
-
-	case BMI_BUGDUINO_CLRGPIO:
-		if ((arg < BUGDUINO_GPIO_0) || (arg > BUGDUINO_GPIO_RED_LED))
-			return -EINVAL;
-		bmi_slot_gpio_set_value (slot, arg, 0x0);
+	case BMI_BUGDUINO_I2C_READ:
+		{
+			struct i2c_xfer xfer;
+			ret = copy_from_user( &xfer, (struct i2c_xfer __user *)arg, sizeof( struct i2c_xfer) );
+			if (ret != 0){
+				printk( KERN_ERR "bmi_bugduino.c: Error copying i2c_xfer from user to kernel space. %i\n", ret);
+				return ret;
+			}
+			memset(msg, 0, xfer.len);
+			chk_i2c_dev (bugduino, &xfer);
+			ret = ReadBytes_I2C (bugduino->i2c_dev, xfer.offset, msg, xfer.len);
+			if (ret < 0)
+				printk( KERN_ERR "bmi_bugduino.c: Error writing i2c bytes %i\n", ret);
+			ret = copy_from_user( xfer.data, msg, BUF_MAX_SIZE );
+			if (ret != 0){
+				printk( KERN_ERR "bmi_bugduino.c: Error copying i2c data from user to kernel space. %i\n", ret);
+			}
+			return ret;
+		}
 		break;
 
 	case BMI_BUGDUINO_MKIOX_OUT:
@@ -491,7 +558,8 @@ int bmi_bugduino_probe(struct bmi_device *bdev)
 	
 	// turn LED's off
 	bmi_slot_gpio_set_value (slot, RED_LED, 1);
-	bmi_slot_gpio_set_value (slot, GREEN_LED, 1);		// Red, Green LED=OFF 		
+	bmi_slot_gpio_set_value (slot, GREEN_LED, 1);		// Red, Green LED=OFF 	
+	bmi_slot_gpio_direction_out (slot, BUGDUINO_GPIO_RESET_PIN, 0);	// AVR Reset Pin
 
 	if (WriteByte_IOX(bugduino->iox, IOX_OUTPUT_REG, 0x00) < 0) {  // IOX[7:0] low
 	  printk (KERN_ERR "bmi_bugduino.c: probe() - write IOX failed\n");
@@ -540,6 +608,8 @@ void bmi_bugduino_remove(struct bmi_device *bdev)
 
 	i2c_unregister_device(bugduino->iox);
 	spi_unregister_device(bugduino->spi);
+	if (bugduino->i2c_dev != NULL)
+		i2c_unregister_device(bugduino->i2c_dev);
 
 	irq = bdev->slot->status_irq;
 	free_irq (irq, bugduino);
