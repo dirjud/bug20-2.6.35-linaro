@@ -288,7 +288,7 @@ int cntl_ioctl(struct inode *inode, struct file *file, unsigned int cmd,
 				return ret;
 			}
 			memset(msg, 0, xfer.len);
-			ret = copy_from_user( xfer.data, msg, BUF_MAX_SIZE );
+			ret = copy_from_user( msg, xfer.data, xfer.len );
 			if (ret != 0){
 				printk( KERN_ERR "bmi_bugduino.c: Error copying i2c data from user to kernel space. %i\n", ret);
 				return ret;
@@ -315,7 +315,7 @@ int cntl_ioctl(struct inode *inode, struct file *file, unsigned int cmd,
 			ret = ReadBytes_I2C (bugduino->i2c_dev, xfer.offset, msg, xfer.len);
 			if (ret < 0)
 				printk( KERN_ERR "bmi_bugduino.c: Error writing i2c bytes %i\n", ret);
-			ret = copy_from_user( xfer.data, msg, BUF_MAX_SIZE );
+			ret = copy_from_user( msg, xfer.data, xfer.len );
 			if (ret != 0){
 				printk( KERN_ERR "bmi_bugduino.c: Error copying i2c data from user to kernel space. %i\n", ret);
 			}
