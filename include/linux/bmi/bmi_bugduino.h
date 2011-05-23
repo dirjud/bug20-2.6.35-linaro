@@ -23,6 +23,12 @@
 #define BUGDUINO_RESET_ON		1
 #define BUGDUINO_RESET_OFF		0
 
+#define UART_SLOT_0			"/dev/ttyBMI0"
+//This is deprecated
+#define UART_SLOT_1			"/dev/ttyBMI1"
+#define UART_SLOT_2			"/dev/ttyBMI2"
+#define UART_SLOT_3			"/dev/ttyBMI3"
+
 // I2C
 // I2C Slave Addresses
 #define BMI_IOX_I2C_ADDRESS	0x71	// 7-bit address
