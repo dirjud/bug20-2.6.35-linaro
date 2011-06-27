@@ -36,9 +36,6 @@
 
 #include <asm/uaccess.h>
 
-	//EDITED FOR BENCHMARKING DEBUG
-#include <linux/time.h>
-	//EDITED FOR BENCHMARKING DEBUG
 
 /*
  * This supports acccess to SPI devices using normal userspace I/O calls.
@@ -317,11 +314,6 @@ spidev_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 	unsigned		n_ioc;
 	struct spi_ioc_transfer	*ioc;
 
-	//EDITED FOR BENCHMARKING DEBUG
-	struct timeval tv[3];
-	do_gettimeofday(&tv[0]);
-	//EDITED FOR BENCHMARKING DEBUG
-
 	/* Check type and command number */
 	if (_IOC_TYPE(cmd) != SPI_IOC_MAGIC)
 		return -ENOTTY;
@@ -476,13 +468,6 @@ spidev_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 
 	mutex_unlock(&spidev->buf_lock);
 	spi_dev_put(spi);
-
-	//EDITED FOR BENCHMARKING DEBUG
-	do_gettimeofday(&tv[1]);
-	do_gettimeofday(&tv[2]);
-	printk("SPIDEV ioctl time: %ld us (%ld)\r\n",tv[1].tv_usec-tv[0].tv_usec,tv[2].tv_usec-tv[1].tv_usec);
-	//EDITED FOR BENCHMARKING DEBUG
-	
 	return retval;
 }
 
