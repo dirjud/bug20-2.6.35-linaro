@@ -30,6 +30,7 @@
 #include <linux/device.h>
 #include <linux/interrupt.h>
 #include <linux/miscdevice.h>
+#include <linux/sched.h>
 
 #include <asm/irq.h>
 #include <asm/io.h>
@@ -37,11 +38,19 @@
 #include <linux/bmi.h>
 #include <linux/bmi/bmi_gsm.h>
 
+#include <linux/errno.h>
+#include <linux/platform_device.h>
+#include <linux/gpio.h>
+#include <linux/bmi/omap_bmi.h>
+#include <plat/board.h>
+
+
 #define DEBUG
 #undef DEBUG
 
-#define BMIGSM_VERSION		"1.0"		// driver version
+#define BMIGSM_VERSION		"1.1"		// driver version
 
+#define IOEXP_START 	212       //From slots_omap_bug.c
 
 // private device structure
 struct bmi_gsm
@@ -76,6 +85,7 @@ MODULE_DEVICE_TABLE(bmi, bmi_gsm_tbl);
 
 int	bmi_gsm_probe(struct bmi_device *bdev);
 void	bmi_gsm_remove(struct bmi_device *bdev);
+void bmi_gsm_slot_power(int slot, int state);
 
 // BMI driver structure
 static struct bmi_driver bmi_gsm_driver = 
@@ -122,6 +132,28 @@ int cntl_release(struct inode *inode, struct file *file)
 	return 0;
 }
 
+// Toggle ONLY slot power - modified from slots_omap_bug.c
+void bmi_gsm_slot_power(int slot, int state){
+  if (!((state == 0)||(state == 1)))
+    return;
+  switch(slot) {
+  case 0:
+    gpio_direction_output(IOEXP_START + 16,state);
+    break;
+  case 1:
+    gpio_direction_output(IOEXP_START + 17,state);
+    break;
+  case 2:
+    gpio_direction_output(IOEXP_START + 18,state);
+    break;
+  case 3:
+    gpio_direction_output(IOEXP_START + 19,state);
+    break;
+  default:
+    break;
+  }
+}
+
 
 // ioctl
 int cntl_ioctl(struct inode *inode, struct file *filp, unsigned int cmd, 
@@ -151,6 +183,17 @@ int cntl_ioctl(struct inode *inode, struct file *filp, unsigned int cmd,
     break;
   case BMI_GSM_GLEDON:
     bmi_slot_gpio_set_value(slot, GREEN_LED, 0); // Green LED=ON
+    break;
+  case BMI_GSM_RESTART:
+    printk(KERN_INFO "GSM - Power Down + Discharge cap...\n");
+    bmi_gsm_slot_power(slot, 0);                      // Turn off Slot 5v
+    bmi_slot_gpio_set_value(slot, GPIO_0, 1);     // Drain supercap
+    //Sleep for at least 5 seconds while the supercap discharges
+    set_current_state(TASK_INTERRUPTIBLE);
+    schedule_timeout(5 * HZ);
+    printk(KERN_INFO "GSM - power back up\n");
+    bmi_slot_gpio_set_value(slot, GPIO_0, 0);     // Cease draining supercap
+    bmi_gsm_slot_power(slot, 1);                      // Reenable Slot 5v.
     break;
   }
   return 0;

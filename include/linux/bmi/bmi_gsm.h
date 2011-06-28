@@ -29,6 +29,7 @@
 #define BMI_GSM_GETSTAT		_IOR(BMI_GSM_IOCTL, 0x5, unsigned int *)		// READ IOX register
 #define BMI_GSM_SUSPEND		_IOW(BMI_GSM_IOCTL, 0x6, unsigned int)		
 #define BMI_GSM_RESUME 		_IOW(BMI_GSM_IOCTL, 0x7, unsigned int)		
+#define BMI_GSM_RESTART    _IOW(BMI_GSM_IOCTL, 0x8, unsigned int)    //Power cycle the module, draining supercap in between.
 
 
 #endif	/* BMI_GSM_H */
